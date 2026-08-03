@@ -44,3 +44,58 @@ On-chain checks show `timelock(0x70897b23) == 0` and `timelock(0x6a5f1aa2) == 0`
 - **Role concentration**: the Curator address is also flagged as a Sentinel (`isSentinel(curator) == true`). Since the Sentinel role exists specifically to provide an independent check that can revoke malicious Curator proposals, having both roles held by the same address removes that separation of duties.
 - **`setPerformanceFee` is not abdicated** (`abdicated(0x70897b23) == false`), so the function remains usable — this is not a dead vault.
 - Both fees are currently `0` with unset recipients, consistent with a fresh testnet deployment rather than a live production configuration.
+
+
+
+## 2. Preparing the Fee Change
+
+**Script:** `script/PrepareFeeChange.s.sol`
+
+This script reads live vault state, converts a human-readable fee input into the contract's integer units, validates it, and generates **unsigned calldata** for both stages of a Morpho VaultV2 fee change. It never signs or broadcasts a transaction.
+
+### Human-readable input → contract units
+
+The script accepts the proposed fee in **basis points** (1 bps = 0.01%), avoiding floating-point arithmetic entirely as required. Morpho VaultV2 stores `performanceFee` scaled by `1e18` (`1e18` = 100%), so the conversion is:
+newFeeScaled = proposedFeeBps * 1e14
+
+e.g. `300` bps → `30000000000000000` (3.00%).
+
+### Validation
+
+- Rejects any proposal above Morpho's documented 50% performance-fee cap (`5000` bps), read as a hardcoded constant sourced from Morpho's docs rather than an on-chain call, since no explicit `MAX_FEE`-style getter was found on this interface.
+- Rejects a "change" identical to the current fee.
+- Rejects if `abdicated(setPerformanceFee selector)` is `true` (i.e. the function has been permanently disabled by the Curator).
+- Guards against the wrong network via `require(block.chainid == 46630)`.
+
+### Staged calldata output
+
+Because fee changes on Morpho VaultV2 go through a two-step Submit → Execute process (see Step 1), the script outputs two distinct pieces of calldata:
+
+1. **Stage 1 — `submit(bytes)`**: must be sent by the **Curator** (`0x967E7529DDf8B10dF01B73A384e02090DFB640D1`). Wraps the inner `setPerformanceFee(uint256)` call.
+2. **Stage 2 — `setPerformanceFee(uint256)`**: callable by **anyone** once `executableAt(data)` has passed. Since the configured timelock for this function is currently `0` seconds, this is executable immediately after Stage 1.
+
+### Example run
+
+forge script script/PrepareFeeChange.s.sol
+--rpc-url $ROBINHOOD_TESTNET_RPC_URL
+--sig "run(uint256)" 300
+
+Output (abridged):
+
+Current fee (raw) : 0
+Configured timelock : 0 seconds
+Proposed fee (raw) : 30000000000000000
+STAGE 1 (submit, by Curator): 0xef7fa71b...
+STAGE 2 (execute, by anyone): 0x70897b23000000000000000000000000000000000000000000000000006a94d74f430000
+
+Both calldata payloads were manually decoded and verified:
+- `cast --to-hex 30000000000000000` confirmed the fee value matches the tail of the Stage 2 calldata.
+- `cast 4byte-decode` confirmed the Stage 1 calldata correctly decodes as `submit(bytes)` wrapping the Stage 2 payload.
+
+### Failure case tested
+
+Running with `6000` bps (60%, above the 50% cap) correctly reverted with `"Proposed fee exceeds Morpho's 50% performance fee cap"`, confirming the validation logic works before any calldata is generated.
+
+### Note on role enforcement
+
+The claim that only the Curator can call `submit`/`setPerformanceFee` is currently based on Morpho's published documentation for this framework, not on inspection of this specific contract's bytecode (which is unverified). This is empirically verified in the fork tests (Step 4) via an unauthorized-caller failure test, rather than assumed.
