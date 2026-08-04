@@ -6,6 +6,16 @@ on Robinhood Chain Testnet. No transaction in this repository is ever signed
 or broadcast to a live network — all mutations occur inside local, in-memory
 Anvil/Forge forks.
 
+## Contents
+- [Setup](#setup)
+- [Running the Tests](#running-the-tests)
+- [Running the Scripts](#running-the-scripts)
+- [1. Vault Investigation](#1-vault-investigation)
+- [2. Preparing the Fee Change](#2-preparing-the-fee-change)
+- [3. Fork Testing](#3-fork-testing)
+- [AI Usage Note](#ai-usage-note)
+- [What Remains](#what-remains--known-limitations)
+
 ## Setup
 
 1. Install Foundry (if not already installed):
