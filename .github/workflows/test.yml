@@ -33,3 +33,5 @@ jobs:
 
       - name: Run Forge tests
         run: forge test -vvv
+        env:
+          ROBINHOOD_TESTNET_RPC_URL: ${{ secrets.ROBINHOOD_TESTNET_RPC_URL }}
