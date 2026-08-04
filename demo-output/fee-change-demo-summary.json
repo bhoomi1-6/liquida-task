@@ -1,0 +1,14 @@
+{
+  "chainId": 46630,
+  "configuredTimelockSeconds": 0,
+  "curator": "0x967E7529DDf8B10dF01B73A384e02090DFB640D1",
+  "feeAfter": 30000000000000000,
+  "feeBefore": 0,
+  "mutationsOccurredOnlyLocally": true,
+  "owner": "0x5025B416632ccaF169262Edf2Cd398D9B7dCC16f",
+  "recipientAfter": "0x000000000000000000000000000000000000cafE",
+  "recipientBefore": "0x0000000000000000000000000000000000000000",
+  "stage1RequiredCaller": "0x967E7529DDf8B10dF01B73A384e02090DFB640D1",
+  "stage2Executor": "0x000000000000000000000000000000000000bEEF",
+  "vault": "0xE2fb0bdd0ECc9F2DE7F7d3d113C4AcBD77b80C88"
+}
