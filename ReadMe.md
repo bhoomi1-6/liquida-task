@@ -99,3 +99,48 @@ Running with `6000` bps (60%, above the 50% cap) correctly reverted with `"Propo
 ### Note on role enforcement
 
 The claim that only the Curator can call `submit`/`setPerformanceFee` is currently based on Morpho's published documentation for this framework, not on inspection of this specific contract's bytecode (which is unverified). This is empirically verified in the fork tests (Step 4) via an unauthorized-caller failure test, rather than assumed.
+
+## 3. Fork Testing
+
+**Test file:** `test/VaultFeeChange.t.sol`
+
+All tests run against a local Anvil-based fork of Robinhood Chain Testnet via Foundry's `vm.createSelectFork`. No test in this suite signs or broadcasts a transaction to the real network — all role impersonation uses `vm.prank`, which only functions inside the local fork's simulated EVM.
+
+```bash
+forge test --match-path test/VaultFeeChange.t.sol -vvv
+```
+
+### Results
+
+Ran 6 tests for test/VaultFeeChange.t.sol:VaultFeeChangeTest
+[PASS] testExcessiveFeeRejectedOnChain()
+[PASS] testExecutionBeforeTimelockReverts()
+[PASS] testInitialFeeIsZero()
+[PASS] testInitialTimelockIsZero()
+[PASS] testSuccessfulFeeChangeLifecycle()
+[PASS] testUnauthorizedCallerCannotSubmit()
+
+Suite result: ok. 6 passed; 0 failed; 0 skipped
+
+### What each test proves
+
+| Test | Proves |
+|---|---|
+| `testInitialFeeIsZero` | Confirms the vault's real initial state (0% fee, unset recipient) before any mutation, matching Step 1's investigation. |
+| `testInitialTimelockIsZero` | Confirms `timelock(setPerformanceFee selector) == 0` on this deployment, as found in Step 1. |
+| `testSuccessfulFeeChangeLifecycle` | Full happy-path: Curator submits a fee-recipient change, warps past the timelock, executes it; then submits and executes a performance-fee change to 3%; asserts the new fee is active on-chain. Execution is deliberately performed by an unrelated address (not the Curator) to prove the "anyone can execute post-timelock" behaviour. |
+| `testUnauthorizedCallerCannotSubmit` | A non-Curator address attempting `submit()` reverts, empirically confirming the Curator-only restriction (previously only assumed from documentation — see note below). |
+| `testExcessiveFeeRejectedOnChain` | A proposed fee above Morpho's documented 50% cap is submitted, timelock-advanced, and rejected on execution by the contract itself (not just by the off-chain script's validation in Step 2). |
+| `testExecutionBeforeTimelockReverts` | Since this deployment's default timelock is 0, the Curator first raises `timelock(setPerformanceFee)` to 2 days, then a subsequent fee-change proposal is shown to correctly fail if executed before that new delay has elapsed. |
+
+### Discovered invariant: `FeeInvariantBroken()`
+
+The first version of `testSuccessfulFeeChangeLifecycle` attempted to set a nonzero performance fee without first setting a recipient, and reverted with an undocumented (at the function level) custom error, selector `0xda9e0fa0`. Cross-referencing Morpho's `ErrorsLib` reference confirmed this as:
+
+> `FeeInvariantBroken()` — "Fee recipient required when fee is non-zero."
+
+This is a real on-chain safety invariant that was only discovered by testing against the live fork, not from reading function-level documentation. The corrected test now sets `performanceFeeRecipient` first (via the same submit → warp → execute pattern) before changing the fee — matching what a real Curator would need to do in practice. This is noted in the AI-usage section below as an example of verifying assumptions against actual contract behaviour rather than trusting documentation or a first-pass script.
+
+### Note on role verification
+
+Step 1/2 identified the Curator-only restriction from Morpho's published documentation, since the deployed contract itself is unverified and its access-control logic couldn't be read directly. `testUnauthorizedCallerCannotSubmit` closes that gap empirically: an unrelated address attempting `submit()` on the live fork reverts, confirming the documented restriction actually holds for this specific deployment.
