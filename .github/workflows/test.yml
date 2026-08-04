@@ -35,3 +35,4 @@ jobs:
         run: forge test -vvv
         env:
           ROBINHOOD_TESTNET_RPC_URL: ${{ secrets.ROBINHOOD_TESTNET_RPC_URL }}
+          ROBINHOOD_TESTNET_FORK_BLOCK: ${{ secrets.ROBINHOOD_TESTNET_FORK_BLOCK }}

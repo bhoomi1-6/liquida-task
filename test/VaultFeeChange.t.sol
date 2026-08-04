@@ -22,7 +22,12 @@ contract VaultFeeChangeTest is Test {
     function setUp() public {
         // Fork Robinhood Chain Testnet at its current head. Pin to a fixed
         // block via ROBINHOOD_TESTNET_FORK_BLOCK for fully reproducible runs.
-        vm.createSelectFork(vm.envString("ROBINHOOD_TESTNET_RPC_URL"));
+        uint256 forkBlock = vm.envOr("ROBINHOOD_TESTNET_FORK_BLOCK", uint256(0));
+        if (forkBlock == 0) {
+            vm.createSelectFork(vm.envString("ROBINHOOD_TESTNET_RPC_URL"));
+        } else {
+            vm.createSelectFork(vm.envString("ROBINHOOD_TESTNET_RPC_URL"), forkBlock);
+        }
 
         curator = vault.curator();
         owner = vault.owner();
