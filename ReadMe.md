@@ -1,3 +1,72 @@
+# Liquida Vault Fee Change — Take-Home Submission
+
+Investigation, preparation, and safe local-fork testing of a performance-fee
+change on a Morpho Vaults V2 deployment (`0xE2fb0bdd0ECc9F2DE7F7d3d113C4AcBD77b80C88`)
+on Robinhood Chain Testnet. No transaction in this repository is ever signed
+or broadcast to a live network — all mutations occur inside local, in-memory
+Anvil/Forge forks.
+
+## Setup
+
+1. Install Foundry (if not already installed):
+```bash
+   curl -L https://getfoundry.sh/install | bash
+   foundryup
+```
+
+2. Clone this repository and install dependencies:
+```bash
+   git clone <this-repo-url>
+   cd liquida-task
+```
+   (Dependencies are vendored as a git submodule under `lib/` and are pulled in automatically via `git clone --recurse-submodules`, or run `git submodule update --init --recursive` if you cloned without that flag.)
+
+3. Copy `.env.example` to `.env` and fill in the RPC URL (a public testnet endpoint, no secrets required):
+```bash
+   cp .env.example .env
+```
+   Then load it into your shell:
+```bash
+   source .env
+   export $(cut -d= -f1 .env)
+```
+
+## Running the tests
+
+```bash
+forge fmt --check      # confirm formatting
+forge build             # compile
+forge test -vvv         # run all fork tests
+```
+
+Expected result: 6 tests passing, including 3 failure-case tests (unauthorized caller, excessive fee, execution before timelock). See "Fork Testing" section below for details.
+
+Tests fork Robinhood Chain Testnet at a pinned block (`ROBINHOOD_TESTNET_FORK_BLOCK` in `.env`) for reproducibility. Unset this variable to instead fork at the current chain head.
+
+## Running the scripts
+
+**Prepare unsigned calldata for a proposed fee change** (read-only, no state change, safe against any network):
+```bash
+forge script script/PrepareFeeChange.s.sol \
+  --rpc-url $ROBINHOOD_TESTNET_RPC_URL \
+  --sig "run(uint256)" 300   # 300 = 3.00% in basis points
+```
+
+**Run the full fee-change lifecycle on a local in-memory fork** (produces terminal + JSON output, never broadcasts):
+```bash
+forge script script/DemoFeeChangeOnFork.s.sol \
+  --rpc-url $ROBINHOOD_TESTNET_RPC_URL \
+  --sig "run(uint256)" 300
+```
+Output is written to `demo-output/fee-change-demo-summary.json`.
+
+> **Safety note:** neither script is ever run with the `--broadcast` flag anywhere in this repository or its CI pipeline. Omitting `--broadcast` is what keeps `forge script` execution entirely local, even though it reads from a live RPC endpoint.
+
+## Continuous Integration
+
+Every push runs `forge fmt --check`, `forge build`, and `forge test -vvv` via GitHub Actions (`.github/workflows/test.yml`). The RPC URL and pinned fork block are supplied as repository secrets, never committed to source.
+
+---
 ## 1. Vault Investigation
 
 **Target:** `0xE2fb0bdd0ECc9F2DE7F7d3d113C4AcBD77b80C88` on Robinhood Chain Testnet (chain ID 46630)
@@ -144,3 +213,24 @@ This is a real on-chain safety invariant that was only discovered by testing aga
 ### Note on role verification
 
 Step 1/2 identified the Curator-only restriction from Morpho's published documentation, since the deployed contract itself is unverified and its access-control logic couldn't be read directly. `testUnauthorizedCallerCannotSubmit` closes that gap empirically: an unrelated address attempting `submit()` on the live fork reverts, confirming the documented restriction actually holds for this specific deployment.
+
+
+## AI Usage Note
+
+I used Claude throughout this task to accelerate investigation, scaffold Solidity code, and debug CI issues. Specifically:
+
+- **Investigation**: Claude helped decode unfamiliar event signatures and cross-reference them against Morpho's public documentation to identify the vault as a Morpho Vaults V2 instance, since the deployed contract itself is unverified. I independently verified every claimed function/selector by calling it directly against the live contract via `cast call` before trusting it.
+- **Code scaffolding**: Claude drafted the interface, scripts, and test file based on the confirmed interface. I compiled and ran every piece before accepting it, and did not assume correctness from generation alone.
+- **Verification example — the most important one**: my first fork test assumed a performance fee could be set independent of its recipient, based on documentation that didn't state this constraint explicitly. Running the test against the live fork produced an unexpected custom error revert (`0xda9e0fa0`). I looked this up independently against Morpho's public `ErrorsLib` reference and confirmed it as `FeeInvariantBroken()` — a real on-chain safety invariant that AI-assisted code had missed. I fixed the test to set the recipient first, and used this as a concrete example that fork testing, not documentation or AI-generated assumptions, is the actual source of truth for how this contract behaves.
+- **CI/tooling debugging**: Claude helped diagnose GitHub Actions failures (missing secrets, formatting mismatches, filesystem permission errors for `vm.writeJson`) by reading the actual error output rather than guessing.
+
+Nothing in this repository — role assumptions, fee units, function selectors, or test assertions — was accepted without being checked against either live on-chain state or Morpho's official documentation.
+
+## What Remains / Known Limitations
+
+- Only `performanceFee` was tested end-to-end; `managementFee` follows an identical pattern on this vault but wasn't separately exercised.
+- The Sentinel's ability to revoke a pending proposal (`revoke()`) wasn't tested, though the role and its purpose are documented in the investigation.
+- The 2-day timelock used in `testExecutionBeforeTimelockReverts` is a synthetic value chosen to demonstrate the mechanism, not Liquida's actual intended production timelock duration (which wasn't specified in the task).
+- `multicall` batching of the recipient-then-fee two-step flow into a single transaction wasn't explored; the demo currently submits them as two separate calls for clarity.
+
+Given more time, I would prioritise testing `managementFee` next, since it shares the same invariant risk (`FeeInvariantBroken`) discovered for `performanceFee`.
